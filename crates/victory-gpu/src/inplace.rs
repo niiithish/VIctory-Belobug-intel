@@ -762,12 +762,15 @@ impl Rig {
         const SOURCE: &str = "#define RS \"UAV(u0)\"\nRWByteAddressBuffer b : register(u0);\n[RootSignature(RS)]\n[numthreads(1, 1, 1)]\nvoid main() { b.Store(8, b.Load(0) + b.Load(4)); }\n";
         let mut code: Option<ID3DBlob> = None;
         // SAFETY: the source and names live through the call; then the
-        // blob's own bytes, which hold the root signature too.
+        // blob's own bytes.
         let (root, pso): (ID3D12RootSignature, ID3D12PipelineState) = unsafe {
             D3DCompile(SOURCE.as_ptr().cast(), SOURCE.len(), s!("inplace"), None, None, s!("main"), s!("cs_5_1"), 0, 0, &mut code, None)?;
             let code = code.ok_or_else(windows::core::Error::empty)?;
+            // Not the blob: under Wine the host refuses the signature inside
+            // it (E_FAIL), while a description read from the source's `RS`
+            // and serialized here works, as the title's own signatures do.
+            let root = crate::rootstring::make(&self.device, SOURCE)?;
             let bytes = std::slice::from_raw_parts(code.GetBufferPointer().cast::<u8>(), code.GetBufferSize());
-            let root: ID3D12RootSignature = self.device.CreateRootSignature(0, bytes)?;
             let pso = self.device.CreateComputePipelineState(&D3D12_COMPUTE_PIPELINE_STATE_DESC {
                 pRootSignature: std::mem::transmute_copy(&root),
                 CS: D3D12_SHADER_BYTECODE { pShaderBytecode: bytes.as_ptr().cast(), BytecodeLength: bytes.len() },

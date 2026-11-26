@@ -174,7 +174,10 @@ impl Player {
                 code.GetBufferPointer().cast::<u8>(),
                 code.GetBufferSize(),
             );
-            let root: ID3D12RootSignature = self.device.CreateRootSignature(0, bytes)?;
+            // Not the blob: under Wine the host refuses the signature inside
+            // it (E_FAIL), while a description read from the source's `RS`
+            // and serialized here works, as the title's own signatures do.
+            let root: ID3D12RootSignature = crate::rootstring::make(&self.device, SOURCE)?;
             let pso =
                 self.device
                     .CreateComputePipelineState(&D3D12_COMPUTE_PIPELINE_STATE_DESC {

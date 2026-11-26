@@ -126,7 +126,10 @@ fn run(device: &ID3D12Device, wanted: &dyn Fn() -> bool, stop: &AtomicBool) -> w
     // root signature is inside it. Two closed lists, sent in turn, whose
     // objects live until what was sent last has run.
     unsafe {
-        let root: ID3D12RootSignature = device.CreateRootSignature(0, &code)?;
+        // Not the blob: under Wine the host refuses the signature inside it
+        // (E_FAIL), while a description read from the source's `RS` and
+        // serialized here works, as the title's own signatures do.
+        let root: ID3D12RootSignature = crate::rootstring::make(device, COUNT)?;
         let pso: ID3D12PipelineState = device.CreateComputePipelineState(&D3D12_COMPUTE_PIPELINE_STATE_DESC {
             pRootSignature: std::mem::transmute_copy(&root),
             CS: D3D12_SHADER_BYTECODE {

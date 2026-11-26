@@ -40,7 +40,7 @@ ByteAddressBuffer src3 : register(t3);
 // record's offset in the source; its place in the scratch buffer; nothing.
 ByteAddressBuffer jobs : register(t4);
 RWByteAddressBuffer dst_args : register(u0);
-RWByteAddressBuffer budget : register(u1);
+RWStructuredBuffer<uint> budget : register(u1);
 static const uint BUDGET = 1u << 27;
 static const uint GROUPS = 1u << 20;
 groupshared uint costs[64];
@@ -117,8 +117,7 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex) {
     uint n = count > first ? min(64u, count - first) : 0u;
     if (gi == 0 && n > 0) {
         uint before;
-        budget.InterlockedOr(0, 0, before);
-        [allow_uav_condition]
+        InterlockedOr(budget[0], 0, before);
         while (before < BUDGET) {
             uint next = before;
             for (uint j = 0; j < n; j++) {
@@ -129,7 +128,7 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex) {
             }
             if (next == before) break;
             uint prev;
-            budget.InterlockedCompareExchange(0, before, next, prev);
+            InterlockedCompareExchange(budget[0], before, next, prev);
             if (prev == before) break;
             before = prev;
         }
@@ -151,17 +150,17 @@ void main(uint3 id : SV_DispatchThreadID, uint gi : SV_GroupIndex) {
         // the largest cost there was (small ones are not told).
         uint told;
         if (refused > 0) {
-            budget.InterlockedAdd(12, refused, told);
+            InterlockedAdd(budget[3], refused, told);
         }
         if (biggest >= (1u << 22)) {
-            budget.InterlockedMax(16, biggest, told);
+            InterlockedMax(budget[4], biggest, told);
         }
     }
     GroupMemoryBarrierWithGroupSync();
     if (gi == 0 && n > 0 && all_asked > 0) {
         uint was;
-        budget.InterlockedMax(4, largest_asked, was);
-        budget.InterlockedAdd(8, all_asked, was);
+        InterlockedMax(budget[1], largest_asked, was);
+        InterlockedAdd(budget[2], all_asked, was);
     }
     if (!active) {
         return;

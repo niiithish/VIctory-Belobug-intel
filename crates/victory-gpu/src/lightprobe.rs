@@ -152,10 +152,14 @@ fn pipeline(
     rs: &str,
     entry: windows::core::PCSTR,
 ) -> windows::core::Result<(ID3D12RootSignature, ID3D12PipelineState)> {
-    let code = crate::host::compile(&format!("#define {part}\n#define RS \"{rs}\"\n{SOURCE}"), entry, s!("cs_5_1"))?;
-    // SAFETY: the root signature is inside the shader; plain creations.
+    let source = format!("#define {part}\n#define RS \"{rs}\"\n{SOURCE}");
+    let code = crate::host::compile(&source, entry, s!("cs_5_1"))?;
+    // SAFETY: plain creations. Not the blob for the root signature: under
+    // Wine the host refuses the signature inside it (E_FAIL), while a
+    // description read from the source's `RS` and serialized here works,
+    // as the title's own signatures do.
     unsafe {
-        let root: ID3D12RootSignature = device.CreateRootSignature(0, &code)?;
+        let root: ID3D12RootSignature = crate::rootstring::make(device, &source)?;
         let desc = D3D12_COMPUTE_PIPELINE_STATE_DESC {
             pRootSignature: std::mem::transmute_copy(&root),
             CS: D3D12_SHADER_BYTECODE { pShaderBytecode: code.as_ptr().cast(), BytecodeLength: code.len() },

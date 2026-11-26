@@ -83,10 +83,12 @@ fn pass(host: &Host) -> Option<&'static Pass> {
     static PASS: OnceLock<Option<Pass>> = OnceLock::new();
     PASS.get_or_init(|| {
         let code = compile(SCATTER, windows::core::s!("main"), windows::core::s!("cs_5_1")).ok()?;
-        // SAFETY: the code lives through the calls; the root signature is
-        // inside it.
+        // SAFETY: the code lives through the calls. Not the blob for the
+        // root signature: under Wine the host refuses the signature inside
+        // it (E_FAIL), while a description read from the source's `RS` and
+        // serialized here works, as the title's own signatures do.
         unsafe {
-            let root: ID3D12RootSignature = host.device.CreateRootSignature(0, &code).ok()?;
+            let root: ID3D12RootSignature = crate::rootstring::make(&host.device, SCATTER).ok()?;
             let pso: ID3D12PipelineState = host
                 .device
                 .CreateComputePipelineState(&D3D12_COMPUTE_PIPELINE_STATE_DESC {
