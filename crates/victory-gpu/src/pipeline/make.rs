@@ -674,6 +674,8 @@ fn spawn_worker(screens_only: bool) -> bool {
     let slot = NEXT_SLOT.fetch_add(1, Ordering::Relaxed);
     let spawned = std::thread::Builder::new()
         .name(format!("victory-pipelines-{slot}"))
+        // 64 MB: deep shader compiles overflow the default stack under Wine (DexNom #37).
+        .stack_size(64 << 20)
         .spawn(move || {
             WORKER_SLOT.set(slot);
             // Below the title's own threads (loading, recording),
