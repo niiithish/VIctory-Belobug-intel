@@ -2210,7 +2210,9 @@ cbuffer Span : register(b0) {
 ByteAddressBuffer now : register(t0);
 // 16 bytes per piece of the copy: the hash of its bytes when they were
 // last sent up (or hashed whole, the first time).
-RWByteAddressBuffer hashes : register(u0);
+// A structured view of the same 16 bytes a piece: Wine's HLSL compiler has
+// no Load4 on a writable byte buffer.
+RWStructuredBuffer<uint4> hashes : register(u0);
 RWByteAddressBuffer differs : register(u1);
 groupshared uint4 parts[64];
 [RootSignature(RS)]
@@ -2269,12 +2271,12 @@ void main(uint3 id : SV_GroupID, uint thread : SV_GroupIndex) {
     if (compare != 0u) {
         // The flag, and above it 31 bits of the hash (`torn`).
         uint folded = h.x ^ (h.y * 3u) ^ (h.z * 5u) ^ (h.w * 7u);
-        differs.Store(out_at + id.x * 4u, (folded << 1u) | (any(h != hashes.Load4(piece * 16u)) ? 1u : 0u));
+        differs.Store(out_at + id.x * 4u, (folded << 1u) | (any(h != hashes[piece]) ? 1u : 0u));
         // With the copy-back on its own thread: the next compare of the
         // piece finds what is written from here on.
-        if (compare == 2u) hashes.Store4(piece * 16u, h);
+        if (compare == 2u) hashes[piece] = h;
     } else {
-        hashes.Store4(piece * 16u, h);
+        hashes[piece] = h;
     }
 }
 "#;
