@@ -47,6 +47,7 @@ the frame now is the one thread that submits the title's work to the card
 | Radeon RX 9060 XT (16 GB), `cd8dfc0` with local changes | In the same Series X interior at 1080p, the game averaged 19.8 fps with ray tracing off and 15.6 fps with it on. Indirect lighting showed white patches and dark smears. [Run settings and results](https://github.com/Belobug/VIctory-Belobug-AMD/issues/313) |
 | GeForce RTX 3090 (24 GB), `a-publier@cd8dfc0` | The prison rendered. Two warm Series S runs averaged 545 and 532 ms per frame. The contributor reported 10.0 and 10.2 GB of VRAM in those runs. [Run settings and results](https://github.com/Belobug/VIctory-Belobug-AMD/issues/333) |
 | Intel Arc B580 (12 GB), revision unreported | Startup and initial menu navigation worked. Further menu interaction slowed to about 0.7 fps before D3D12 device removal. [Crash report](https://github.com/Belobug/VIctory-Belobug-AMD/issues/98) |
+| Intel Arc B570 (10 GB), Linux (Arch, Mesa 26.2.5 ANV, GE-Proton11-14 + vkd3d-proton), Ryzen 5 5600, 32 GB RAM + 46 GB swap | Boots cleanly through first-boot setup and legal/menu screens at locked 30 fps (~3% GPU, ~22 GB RAM) on `--console series-x` (`VICTORY_OUTPUT=1920x1080`, `VICTORY_LEVELS_ON_DEMAND=1`). Pre-translated shaders in under 1 minute. Loads into world with audio; `--console series-s` hits `two-plane composer not made (0x80004005)` under Wine's built-in `d3dcompiler_47.dll`. |
 
 The 10.5 GB of VRAM in the RX 7900 XTX table is the usage reported for that run.
 Memory use and frame time depend on the scene and settings. The [ray-tracing notes](docs/fork-ray-tracing.md)
@@ -139,6 +140,69 @@ target\diag\victory.exe warm --used                     # pipelines earlier runs
 Commands, debugging switches and upstream's own description:
 [docs/README-fxceless.md](docs/README-fxceless.md). Every `VICTORY_...` switch is
 described in a comment where it is read.
+
+## Running on Linux (Proton / vkd3d-proton)
+
+`victory run` and `victory warm` target Windows (`x86_64-pc-windows-msvc`), so on
+Linux you cross-compile `victory.exe` with `cargo-xwin` and launch it through
+`umu-run` (GE-Proton + `vkd3d-proton` for Direct3D 12 Shader Model 6.6 and mesh
+shaders).
+
+### Required packages
+
+On Arch Linux (adjust package names for your distro):
+
+```bash
+# Cross-compilation linker & LLVM tools
+sudo pacman -S lld clang llvm
+
+# Proton/vkd3d-proton launcher + Vulkan driver (pick your GPU driver)
+sudo pacman -S umu-launcher vulkan-intel   # or vulkan-radeon / nvidia-utils
+
+# Rust Windows MSVC target + cargo-xwin
+rustup target add x86_64-pc-windows-msvc
+cargo install --locked cargo-xwin
+```
+
+### Build and configure
+
+```bash
+cp victory.example.toml victory.toml   # set game_dir, cache_dir, data_dir outside the repo
+cargo xwin build --locked --profile diag --target x86_64-pc-windows-msvc -p victory --features diagnostics
+```
+
+### Launch (`scripts/play-linux.sh`)
+
+[scripts/play-linux.sh](scripts/play-linux.sh) reads your paths from `victory.toml`,
+converts them to Wine `Z:\` paths, keeps `vkd3d-proton.cache` in `$CACHE_DIR/vkd3d`
+(outside the repo), and applies defaults tuned for 10 GB VRAM / 32 GB RAM / 6-core CPUs:
+
+```bash
+./scripts/play-linux.sh --shaders          # pre-translate shaders.rpf (~45-60 s on a 6-core CPU)
+./scripts/play-linux.sh --dry-run          # verify PE loading/binding without executing
+./scripts/play-linux.sh --safe --kbm       # conservative first boot (F2 or ` toggles mouse-look)
+./scripts/play-linux.sh --kbm              # standard fast flags (VICTORY_THIN=1, THIN_THREADS=6)
+./scripts/play-linux.sh --ports --kbm      # also enable renderer patches 1, 2, 5, 6, 7
+./scripts/play-linux.sh --warm             # warm driver pipelines after a run
+```
+
+### Resource usage & Linux / Intel Arc notes
+
+- **RAM & swap:** Observed ~22 GB RAM during menus and initial world load on a 32 GB
+  system (with 46 GB swap configured for headroom). Ensure you have generous swap if
+  running on 32 GB RAM.
+- **10 GB VRAM (Intel Arc B570):** `scripts/play-linux.sh` enables
+  `VICTORY_LEVELS_ON_DEMAND=1` (saves ~2.2–3.0 GB VRAM), `VICTORY_OUTPUT=1920x1080`,
+  and `VICTORY_CARD_BUFFERS_MIN_MB=1` / `VICTORY_CARD_BUFFERS_MB=1024` (offloads
+  ~2.2 GB/frame of buffer write-checks from CPU to GPU).
+- **Use `--console series-x` on Linux (default in `play-linux.sh`):** `--console series-s`
+  presents the UI on a second plane via `Composer`, whose `vs_5_1` `[RootSignature]`
+  shader currently fails (`0x80004005`) under Wine's built-in `d3dcompiler_47.dll`,
+  leaving a black screen over the base plane. Series X renders a single plane and avoids
+  this.
+- **Note on `--ports` (`VICTORY_PORT_CBV=1`):** `VICTORY_PORT_CBV=1` changes the shader
+  cache key; if you pre-translated shaders without `--ports`, test `./scripts/play-linux.sh --kbm`
+  first or re-run `./scripts/play-linux.sh --ports --shaders`.
 
 ## What is different here
 
