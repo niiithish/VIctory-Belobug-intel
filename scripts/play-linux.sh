@@ -18,6 +18,7 @@
 #   --shaders       Pre-translate shaders.rpf ahead of time instead of launching the game.
 #   --warm          Pre-build driver pipelines from previous runs (victory warm --used).
 #   --dry-run       Load and bind the executable without executing it.
+#   --log [PATH]    Redirect victory.exe output to a file (default: $CACHE_DIR/victory.log).
 
 set -euo pipefail
 
@@ -45,6 +46,7 @@ BUILD="diag"
 ACTION="run"
 EXE=""
 RUNNER=""
+LOG_FILE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -60,6 +62,13 @@ while [[ $# -gt 0 ]]; do
         --shaders)  ACTION="shaders"; shift ;;
         --warm)     ACTION="warm"; shift ;;
         --dry-run)  ACTION="dry-run"; shift ;;
+        --log)
+            if [[ $# -ge 2 && "$2" != --* ]]; then
+                LOG_FILE="$2"; shift 2
+            else
+                LOG_FILE="$CACHE_DIR/victory.log"; shift
+            fi
+            ;;
         -h|--help)
             sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
@@ -126,7 +135,7 @@ export VICTORY_AMBIENT=0.8
 # and move >=1 MiB buffer write-checks onto the GPU instead of scanning 2+ GB/frame on the CPU.
 export VICTORY_LEVELS_ON_DEMAND="${VICTORY_LEVELS_ON_DEMAND:-1}"
 export VICTORY_CARD_BUFFERS_MIN_MB="${VICTORY_CARD_BUFFERS_MIN_MB:-1}"
-export VICTORY_CARD_BUFFERS_MB="${VICTORY_CARD_BUFFERS_MB:-1024}"
+export VICTORY_CARD_BUFFERS_MB="${VICTORY_CARD_BUFFERS_MB:-512}"
 
 # Explicit Intel adapter preference (optional override via env).
 export VICTORY_D3D12_ADAPTER="${VICTORY_D3D12_ADAPTER:-Intel}"
@@ -169,24 +178,40 @@ fi
 
 cd "$REPO_ROOT"
 
+WIN_RUNNER="$(to_win_path "$RUNNER")"
 WIN_EXE="$(to_win_path "$EXE")"
 WIN_SHADERS="$(to_win_path "$GAME_DIR/shaders.rpf")"
+
+run_victory() {
+    if [[ -n "$LOG_FILE" ]]; then
+        local win_log run_cmd win_cmd
+        mkdir -p "$(dirname "$LOG_FILE")"
+        win_log="$(to_win_path "$LOG_FILE")"
+        run_cmd="$CACHE_DIR/victory-run.cmd"
+        printf '@echo off\r\n"%s" %s > "%s" 2>&1\r\n' "$WIN_RUNNER" "$*" "$win_log" > "$run_cmd"
+        win_cmd="$(to_win_path "$run_cmd")"
+        echo "Logging victory.exe output to $LOG_FILE ..."
+        exec umu-run cmd /c "$win_cmd"
+    else
+        exec umu-run "$RUNNER" "$@"
+    fi
+}
 
 case "$ACTION" in
     shaders)
         echo "Pre-translating shaders from $WIN_SHADERS ..."
-        exec umu-run "$RUNNER" shaders "$WIN_SHADERS"
+        run_victory shaders "$WIN_SHADERS"
         ;;
     warm)
         echo "Warming driver pipelines (--used) ..."
-        exec umu-run "$RUNNER" warm --used
+        run_victory warm --used
         ;;
     dry-run)
         echo "Dry-run binding $WIN_EXE (--console $CONSOLE) ..."
-        exec umu-run "$RUNNER" run "$WIN_EXE" --console "$CONSOLE"
+        run_victory run "$WIN_EXE" --console "$CONSOLE"
         ;;
     run)
         echo "Launching VIctory ($BUILD, mode=$MODE, ports=$PORTS, console=$CONSOLE, kbm=$KBM, rt=$RT) ..."
-        exec umu-run "$RUNNER" run "$WIN_EXE" --console "$CONSOLE" --execute
+        run_victory run "$WIN_EXE" --console "$CONSOLE" --execute
         ;;
 esac

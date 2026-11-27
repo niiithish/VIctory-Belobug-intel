@@ -47,7 +47,7 @@ the frame now is the one thread that submits the title's work to the card
 | Radeon RX 9060 XT (16 GB), `cd8dfc0` with local changes | In the same Series X interior at 1080p, the game averaged 19.8 fps with ray tracing off and 15.6 fps with it on. Indirect lighting showed white patches and dark smears. [Run settings and results](https://github.com/Belobug/VIctory-Belobug-AMD/issues/313) |
 | GeForce RTX 3090 (24 GB), `a-publier@cd8dfc0` | The prison rendered. Two warm Series S runs averaged 545 and 532 ms per frame. The contributor reported 10.0 and 10.2 GB of VRAM in those runs. [Run settings and results](https://github.com/Belobug/VIctory-Belobug-AMD/issues/333) |
 | Intel Arc B580 (12 GB), revision unreported | Startup and initial menu navigation worked. Further menu interaction slowed to about 0.7 fps before D3D12 device removal. [Crash report](https://github.com/Belobug/VIctory-Belobug-AMD/issues/98) |
-| Intel Arc B570 (10 GB), Linux (Arch, Mesa 26.2.5 ANV, GE-Proton11-14 + vkd3d-proton), Ryzen 5 5600, 32 GB RAM + 46 GB swap | Boots cleanly through first-boot setup and legal/menu screens at locked 30 fps (~3% GPU, ~22 GB RAM) on `--console series-x` (`VICTORY_OUTPUT=1920x1080`, `VICTORY_LEVELS_ON_DEMAND=1`). Pre-translated shaders in under 1 minute. Loads into world with audio; `--console series-s` hits `two-plane composer not made (0x80004005)` under Wine's built-in `d3dcompiler_47.dll`. |
+| Intel Arc B570 (10 GB), Linux (Arch, Mesa 26.2.5 ANV, GE-Proton11-14 + vkd3d-proton), Ryzen 5 5600, 32 GB RAM + 46 GB swap | Boots cleanly through first-boot setup, legal/menus (locked 30 fps, ~3% GPU, ~22 GB RAM), opening credits/artwork, sky/horizon, audio, and Prologue pause menu on `--console series-x` (`VICTORY_OUTPUT=1920x1080`, `VICTORY_LEVELS_ON_DEMAND=1`). Pre-translated shaders in under 1 minute. 3D world geometry draws (~2,300/frame) are currently dropped `without a host pipeline` (investigating with `--log`); `--console series-s` hits `two-plane composer not made (0x80004005)` under Wine's built-in `d3dcompiler_47.dll`. |
 
 The 10.5 GB of VRAM in the RX 7900 XTX table is the usage reported for that run.
 Memory use and frame time depend on the scene and settings. The [ray-tracing notes](docs/fork-ray-tracing.md)
@@ -182,6 +182,7 @@ converts them to Wine `Z:\` paths, keeps `vkd3d-proton.cache` in `$CACHE_DIR/vkd
 ./scripts/play-linux.sh --dry-run          # verify PE loading/binding without executing
 ./scripts/play-linux.sh --safe --kbm       # conservative first boot (F2 or ` toggles mouse-look)
 ./scripts/play-linux.sh --kbm              # standard fast flags (VICTORY_THIN=1, THIN_THREADS=6)
+./scripts/play-linux.sh --kbm --log        # same, saving full untruncated logs to ~/.cache/victory/cache/victory.log
 ./scripts/play-linux.sh --ports --kbm      # also enable renderer patches 1, 2, 5, 6, 7
 ./scripts/play-linux.sh --warm             # warm driver pipelines after a run
 ```
@@ -193,8 +194,8 @@ converts them to Wine `Z:\` paths, keeps `vkd3d-proton.cache` in `$CACHE_DIR/vkd
   running on 32 GB RAM.
 - **10 GB VRAM (Intel Arc B570):** `scripts/play-linux.sh` enables
   `VICTORY_LEVELS_ON_DEMAND=1` (saves ~2.2–3.0 GB VRAM), `VICTORY_OUTPUT=1920x1080`,
-  and `VICTORY_CARD_BUFFERS_MIN_MB=1` / `VICTORY_CARD_BUFFERS_MB=1024` (offloads
-  ~2.2 GB/frame of buffer write-checks from CPU to GPU).
+  and `VICTORY_CARD_BUFFERS_MIN_MB=1` / `VICTORY_CARD_BUFFERS_MB=512` (leaves VRAM
+  headroom alongside ~1.5 GB used by the desktop while offloading large buffer checks).
 - **Use `--console series-x` on Linux (default in `play-linux.sh`):** `--console series-s`
   presents the UI on a second plane via `Composer`, whose `vs_5_1` `[RootSignature]`
   shader currently fails (`0x80004005`) under Wine's built-in `d3dcompiler_47.dll`,
