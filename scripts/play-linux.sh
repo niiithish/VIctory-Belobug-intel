@@ -12,7 +12,9 @@
 #   --console MODE  series-s (default, best for 10 GB VRAM) or series-x (sets 1920x1080 output).
 #   --kbm           Enable GTA V PC-style keyboard/mouse controls (VICTORY_KBM_GTA=1; F2 or ` toggles mouse-look).
 #   --rt            Enable ray-traced indirect light (VICTORY_BVH_BUILDER=1; higher VRAM/GPU cost).
-#   --build TYPE    diag (default, enables light DRED) or release.
+#   --book          Record used pipelines to the pipeline book (VICTORY_PIPELINE_BOOK=1) for --warm.
+#   --no-watchdog   Disable the title's watchdog timeout (VICTORY_NO_WATCHDOG=1; helps during slow compile/capture).
+#   --build TYPE    diag (default, enables light DRED) or release (skips DRED unless VICTORY_D3D12_DRED is set).
 #   --exe PATH      Path to game_scarlett_master.exe (default: $VICTORY_GAME_DIR/game_scarlett_master.exe).
 #   --runner PATH   Override victory.exe path (default: target/x86_64-pc-windows-msvc/<build>/victory.exe).
 #   --shaders       Pre-translate shaders.rpf ahead of time instead of launching the game.
@@ -39,9 +41,11 @@ DATA_DIR="${DATA_DIR:-$HOME/.local/share/victory/data}"
 
 MODE="fast"
 PORTS=0
-CONSOLE="series-x"
+CONSOLE="series-s"
 KBM=0
 RT=0
+BOOK=0
+NO_WATCHDOG=0
 BUILD="diag"
 ACTION="run"
 EXE=""
@@ -50,18 +54,20 @@ LOG_FILE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --safe)     MODE="safe"; shift ;;
-        --fast)     MODE="fast"; shift ;;
-        --ports)    PORTS=1; shift ;;
-        --console)  CONSOLE="$2"; shift 2 ;;
-        --kbm)      KBM=1; shift ;;
-        --rt)       RT=1; shift ;;
-        --build)    BUILD="$2"; shift 2 ;;
-        --exe)      EXE="$2"; shift 2 ;;
-        --runner)   RUNNER="$2"; shift 2 ;;
-        --shaders)  ACTION="shaders"; shift ;;
-        --warm)     ACTION="warm"; shift ;;
-        --dry-run)  ACTION="dry-run"; shift ;;
+        --safe)        MODE="safe"; shift ;;
+        --fast)        MODE="fast"; shift ;;
+        --ports)       PORTS=1; shift ;;
+        --console)     CONSOLE="$2"; shift 2 ;;
+        --kbm)         KBM=1; shift ;;
+        --rt)          RT=1; shift ;;
+        --book)        BOOK=1; shift ;;
+        --no-watchdog) NO_WATCHDOG=1; shift ;;
+        --build)       BUILD="$2"; shift 2 ;;
+        --exe)         EXE="$2"; shift 2 ;;
+        --runner)      RUNNER="$2"; shift 2 ;;
+        --shaders)     ACTION="shaders"; shift ;;
+        --warm)        ACTION="warm"; shift ;;
+        --dry-run)     ACTION="dry-run"; shift ;;
         --log)
             if [[ $# -ge 2 && "$2" != --* ]]; then
                 LOG_FILE="$2"; shift 2
@@ -70,7 +76,7 @@ while [[ $# -gt 0 ]]; do
             fi
             ;;
         -h|--help)
-            sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+            awk 'NR>1 && /^#/{sub(/^# ?/,""); print; next} NR>1{exit}' "$0"
             exit 0
             ;;
         *)
@@ -80,13 +86,30 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ "$BUILD" != "diag" && "$BUILD" != "release" ]]; then
+    echo "Unknown --build type: $BUILD (expected diag or release)" >&2
+    exit 2
+fi
+
 EXE="${EXE:-$GAME_DIR/game_scarlett_master.exe}"
 RUNNER="${RUNNER:-$REPO_ROOT/target/x86_64-pc-windows-msvc/$BUILD/victory.exe}"
+
+# Resolve caller-provided relative paths before changing directory to $REPO_ROOT,
+# keeping symlinks intact (-s) because the executable's folder is the title's G:.
+EXE="$(realpath -ms "$EXE")"
+RUNNER="$(realpath -ms "$RUNNER")"
+if [[ -n "$LOG_FILE" ]]; then
+    LOG_FILE="$(realpath -ms "$LOG_FILE")"
+fi
 
 if [[ ! -f "$RUNNER" ]]; then
     echo "Missing $RUNNER." >&2
     echo "Build it first with:" >&2
-    echo "  cargo xwin build --locked --profile $BUILD --target x86_64-pc-windows-msvc -p victory --features diagnostics" >&2
+    if [[ "$BUILD" == "diag" ]]; then
+        echo "  cargo xwin build --locked --profile diag --target x86_64-pc-windows-msvc -p victory --features diagnostics" >&2
+    else
+        echo "  cargo xwin build --locked --profile $BUILD --target x86_64-pc-windows-msvc -p victory" >&2
+    fi
     exit 1
 fi
 
@@ -109,6 +132,7 @@ to_win_path() {
 export GAMEID="${GAMEID:-0}"
 export PROTONPATH="${PROTONPATH:-GE-Proton}"
 export WINEPREFIX="${WINEPREFIX:-$HOME/.local/share/umu/prefixes/victory}"
+export WINEDEBUG="${WINEDEBUG:--all}"
 # Native d3dcompiler_47 is required for VIctory's internal HLSL shaders (indirect clamp,
 # ambient lighting, depth twin copy, and Series S two-plane composer).
 export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+${WINEDLLOVERRIDES};}d3dcompiler_47=n,b"
@@ -133,6 +157,9 @@ export VICTORY_TITLE_PRIORITIES=0
 export VICTORY_CARD_AWAKE=1
 export VICTORY_SHOW_AFTER=1
 export VICTORY_AMBIENT=0.8
+# Proton perf/stability win (upstream PR #248): land echo draws missing skin on
+# character heads under Wine/Proton and adds ~7 ms of frame-prep overhead.
+export VICTORY_LAND_ECHO="${VICTORY_LAND_ECHO:-0}"
 
 # Arc B570 (10 GB VRAM): allocate only texture mip levels held by the title (~2.2-3 GB VRAM saved),
 # and move >=1 MiB buffer write-checks onto the GPU instead of scanning 2+ GB/frame on the CPU.
@@ -143,6 +170,7 @@ export VICTORY_CARD_BUFFERS_MB="${VICTORY_CARD_BUFFERS_MB:-512}"
 # Explicit Intel adapter preference (optional override via env).
 export VICTORY_D3D12_ADAPTER="${VICTORY_D3D12_ADAPTER:-Intel}"
 
+# Light DRED is enabled by default for diag builds; release skips it unless explicitly set.
 if [[ "$BUILD" == "diag" ]]; then
     export VICTORY_D3D12_DRED="${VICTORY_D3D12_DRED:-light}"
 fi
@@ -177,6 +205,14 @@ fi
 
 if [[ "$RT" == "1" ]]; then
     export VICTORY_BVH_BUILDER=1
+fi
+
+if [[ "$BOOK" == "1" ]]; then
+    export VICTORY_PIPELINE_BOOK=1
+fi
+
+if [[ "$NO_WATCHDOG" == "1" ]]; then
+    export VICTORY_NO_WATCHDOG=1
 fi
 
 cd "$REPO_ROOT"
@@ -214,7 +250,7 @@ case "$ACTION" in
         run_victory run "$WIN_EXE" --console "$CONSOLE"
         ;;
     run)
-        echo "Launching VIctory ($BUILD, mode=$MODE, ports=$PORTS, console=$CONSOLE, kbm=$KBM, rt=$RT) ..."
+        echo "Launching VIctory ($BUILD, mode=$MODE, ports=$PORTS, console=$CONSOLE, kbm=$KBM, rt=$RT, book=$BOOK, no_watchdog=$NO_WATCHDOG) ..."
         run_victory run "$WIN_EXE" --console "$CONSOLE" --execute
         ;;
 esac

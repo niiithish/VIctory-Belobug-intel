@@ -171,36 +171,45 @@ cargo install --locked cargo-xwin
 
 ```bash
 cp victory.example.toml victory.toml   # set game_dir, cache_dir, data_dir outside the repo
+
+# Diagnostics build (default for scripts/play-linux.sh, enables light DRED):
 cargo xwin build --locked --profile diag --target x86_64-pc-windows-msvc -p victory --features diagnostics
+
+# Or release build (faster, skips DRED unless VICTORY_D3D12_DRED is set):
+cargo xwin build --locked --profile release --target x86_64-pc-windows-msvc -p victory
 
 # Initialize the prefix once (downloads GE-Proton + steamrt4), then install native d3dcompiler_47:
 ./scripts/play-linux.sh --dry-run
 WINEPREFIX="$HOME/.local/share/umu/prefixes/victory" winetricks -q d3dcompiler_47
 ```
 
-> **Why native `d3dcompiler_47` is required on Linux:** Wine's built-in
-> `d3dcompiler_47.dll` fails to compile 4 of VIctory's internal HLSL shaders
-> (`RWByteAddressBuffer.InterlockedOr` in the indirect argument clamp, `isnan()`
-> in the ambient stand-in, the depth-twin copy shader, and `vs_5_1`
-> `[RootSignature]` in the Series S two-plane composer). Without Microsoft's
-> native `d3dcompiler_47.dll` (`WINEDLLOVERRIDES="d3dcompiler_47=n,b"`, set
-> automatically by `scripts/play-linux.sh`), all indirect 3D world draws are
-> dropped and you only see sky + UI.
+> **Why native `d3dcompiler_47` is recommended on Linux:** Wine's built-in
+> `d3dcompiler_47.dll` historically failed on several of VIctory's internal HLSL
+> shaders (`RWByteAddressBuffer.InterlockedOr` in the indirect argument clamp,
+> `isnan()` in the ambient stand-in, the depth-twin copy shader, and `vs_5_1`
+> `[RootSignature]` in the Series S two-plane composer). Even with upstream Wine
+> HLSL fixes from PR #421 integrated, keeping Microsoft's native
+> `d3dcompiler_47.dll` (`WINEDLLOVERRIDES="d3dcompiler_47=n,b"`, set
+> automatically by `scripts/play-linux.sh`) avoids shader compilation regressions.
 
 ### Launch (`scripts/play-linux.sh`)
 
 [scripts/play-linux.sh](scripts/play-linux.sh) reads your paths from `victory.toml`,
 converts them to Wine `Z:\` paths, keeps `vkd3d-proton.cache` in `$CACHE_DIR/vkd3d`
-(outside the repo), and applies defaults tuned for 10 GB VRAM / 32 GB RAM / 6-core CPUs:
+(outside the repo), sets `VICTORY_LAND_ECHO=0` by default under Proton (fixes
+missing skin on character heads under Wine/Proton and trims frame-prep time, from
+upstream PR #248), and applies defaults tuned for 10 GB VRAM / 32 GB RAM / 6-core CPUs:
 
 ```bash
-./scripts/play-linux.sh --shaders          # pre-translate shaders.rpf (~45-60 s on a 6-core CPU)
-./scripts/play-linux.sh --dry-run          # verify PE loading/binding without executing
-./scripts/play-linux.sh --safe --kbm       # conservative first boot (F2 or ` toggles mouse-look)
-./scripts/play-linux.sh --kbm              # standard fast flags (VICTORY_THIN=1, THIN_THREADS=6)
-./scripts/play-linux.sh --kbm --log        # same, saving full untruncated logs to ~/.cache/victory/cache/victory.log
-./scripts/play-linux.sh --ports --kbm      # also enable renderer patches 1, 2, 5, 6, 7
-./scripts/play-linux.sh --warm             # warm driver pipelines after a run
+./scripts/play-linux.sh --shaders                  # pre-translate shaders.rpf (~45-60 s on a 6-core CPU)
+./scripts/play-linux.sh --dry-run                  # verify PE loading/binding without executing
+./scripts/play-linux.sh --safe --kbm               # conservative first boot (F2 or ` toggles mouse-look)
+./scripts/play-linux.sh --kbm                      # standard fast flags (VICTORY_THIN=1, THIN_THREADS=6)
+./scripts/play-linux.sh --book --no-watchdog --kbm # record used pipelines for --warm without watchdog trips
+./scripts/play-linux.sh --build release --kbm      # launch release build (skips light DRED unless set)
+./scripts/play-linux.sh --kbm --log                # save full untruncated logs to ~/.cache/victory/cache/victory.log
+./scripts/play-linux.sh --ports --kbm              # also enable renderer patches 1, 2, 5, 6, 7
+./scripts/play-linux.sh --warm                     # warm driver pipelines from the recorded pipeline book
 ```
 
 ### Resource usage & Linux / Intel Arc notes
@@ -208,18 +217,37 @@ converts them to Wine `Z:\` paths, keeps `vkd3d-proton.cache` in `$CACHE_DIR/vkd
 - **RAM & swap:** Observed ~22 GB RAM during menus and initial world load on a 32 GB
   system (with 46 GB swap configured for headroom). Ensure you have generous swap if
   running on 32 GB RAM.
-- **10 GB VRAM (Intel Arc B570):** `scripts/play-linux.sh` enables
-  `VICTORY_LEVELS_ON_DEMAND=1` (saves ~2.2–3.0 GB VRAM), `VICTORY_OUTPUT=1920x1080`,
-  and `VICTORY_CARD_BUFFERS_MIN_MB=1` / `VICTORY_CARD_BUFFERS_MB=512` (leaves VRAM
+- **10 GB VRAM (Intel Arc B570) & PR #614:** `scripts/play-linux.sh` enables
+  `VICTORY_LEVELS_ON_DEMAND=1` (saves ~2.2–3.0 GB VRAM), defaults to `--console series-s`,
+  and sets `VICTORY_CARD_BUFFERS_MIN_MB=1` / `VICTORY_CARD_BUFFERS_MB=512` (leaves VRAM
   headroom alongside ~1.5 GB used by the desktop while offloading large buffer checks).
-- **Series S vs Series X on Linux:** With native `d3dcompiler_47.dll` installed,
-  both `--console series-x` (default, 1080p) and `--console series-s` (lower VRAM
-  footprint, ~5 ms faster) work. On 10 GB cards (where Series X reaches ~9.3 / 9.4 GB
-  VRAM), try `--console series-s` to reduce texture eviction pressure.
+  Integrated upstream **PR #614** ensures VRAM accounting and eviction count the mapped
+  tiles of levels-on-demand textures accurately rather than over/under-counting them,
+  improving stability on 10 GB cards. If long sessions still hit OOM (`0x8007000E`),
+  try setting `VICTORY_RESIDENCY=1` as a fallback (`VICTORY_RESIDENCY=1 ./scripts/play-linux.sh ...`).
+- **Linux/Proton stability (PR #421 & PR #248):** Integrated upstream **PR #421**
+  fixes `vkd3d-proton` pipeline library saving (null-blob handling so compiled
+  pipelines persist between runs), raises pipeline worker thread stacks to 64 MB
+  (preventing Wine stack overflows during compilation), adds Wine HLSL compatibility
+  fixes, and adds opt-in `VICTORY_NO_WATCHDOG=1` (`--no-watchdog`) so slow first-run
+  compiles or frame captures do not trip the title's watchdog. `scripts/play-linux.sh`
+  also defaults `VICTORY_LAND_ECHO=0` (from **PR #248**) for Wine/Proton stability
+  and lower frame-prep cost.
+- **Series S vs Series X on Linux:** With native `d3dcompiler_47.dll` and PR #421,
+  both `--console series-s` (default, lower VRAM footprint, ~5 ms faster) and
+  `--console series-x` (`VICTORY_OUTPUT=1920x1080`) work. Series S is the default
+  on 10 GB cards to leave headroom and reduce texture eviction pressure (Series X
+  reaches ~9.3 / 9.4 GB VRAM).
 - **First-run pipeline compilation:** The first time you enter the world, ~1,100+
   pipelines compile on background threads (`being made`), causing low initial FPS
-  (~2 fps) and missing objects until they finish. Run with `VICTORY_PIPELINE_BOOK=1`
-  and then `./scripts/play-linux.sh --warm` to pre-build them into the driver cache.
+  (~2 fps) and missing objects until they finish. Run with
+  `./scripts/play-linux.sh --book --no-watchdog --kbm` (sets `VICTORY_PIPELINE_BOOK=1`
+  and `VICTORY_NO_WATCHDOG=1`) and then `./scripts/play-linux.sh --warm` to pre-build
+  them into the driver cache.
+- **Release vs diagnostics builds (`--build release`):** `--build diag` (default)
+  enables `VICTORY_D3D12_DRED=light` automatically; `--build release` launches
+  `target/x86_64-pc-windows-msvc/release/victory.exe` and skips `VICTORY_D3D12_DRED`
+  unless explicitly set in the environment.
 - **Note on `--ports` (`VICTORY_PORT_CBV=1`):** `VICTORY_PORT_CBV=1` changes the shader
   cache key; if you pre-translated shaders without `--ports`, test `./scripts/play-linux.sh --kbm`
   first or re-run `./scripts/play-linux.sh --ports --shaders`.
