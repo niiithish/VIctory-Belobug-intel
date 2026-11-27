@@ -1,7 +1,10 @@
-# VIctory on an RX 7900 XTX
+# VIctory on Intel Arc & Linux (fork of VIctory-7900XTX)
 
-A fork of [VIctory](https://github.com/Marvisak/VIctory), a compatibility layer
-that runs an Xbox Series title natively on Windows from files the user supplies.
+A fork of [VIctory](https://github.com/Marvisak/VIctory) (via
+[VIctory-7900XTX](https://github.com/avatarmanz/VIctory-7900XTX) /
+[Belobug/VIctory-Belobug-AMD](https://github.com/Belobug/VIctory-Belobug-AMD)),
+a compatibility layer that runs an Xbox Series title natively on Windows — and
+on Linux via Proton + `vkd3d-proton` — from files the user supplies.
 
 ## The goal
 
@@ -47,7 +50,7 @@ the frame now is the one thread that submits the title's work to the card
 | Radeon RX 9060 XT (16 GB), `cd8dfc0` with local changes | In the same Series X interior at 1080p, the game averaged 19.8 fps with ray tracing off and 15.6 fps with it on. Indirect lighting showed white patches and dark smears. [Run settings and results](https://github.com/Belobug/VIctory-Belobug-AMD/issues/313) |
 | GeForce RTX 3090 (24 GB), `a-publier@cd8dfc0` | The prison rendered. Two warm Series S runs averaged 545 and 532 ms per frame. The contributor reported 10.0 and 10.2 GB of VRAM in those runs. [Run settings and results](https://github.com/Belobug/VIctory-Belobug-AMD/issues/333) |
 | Intel Arc B580 (12 GB), revision unreported | Startup and initial menu navigation worked. Further menu interaction slowed to about 0.7 fps before D3D12 device removal. [Crash report](https://github.com/Belobug/VIctory-Belobug-AMD/issues/98) |
-| Intel Arc B570 (10 GB), Linux (Arch, Mesa 26.2.5 ANV, GE-Proton11-14 + vkd3d-proton), Ryzen 5 5600, 32 GB RAM + 46 GB swap | Boots cleanly through first-boot setup, legal/menus (locked 30 fps, ~3% GPU, ~22 GB RAM), opening credits/artwork, sky/horizon, audio, and Prologue pause menu on `--console series-x` (`VICTORY_OUTPUT=1920x1080`, `VICTORY_LEVELS_ON_DEMAND=1`). Pre-translated shaders in under 1 minute. 3D world geometry draws (~2,300/frame) are currently dropped `without a host pipeline` (investigating with `--log`); `--console series-s` hits `two-plane composer not made (0x80004005)` under Wine's built-in `d3dcompiler_47.dll`. |
+| Intel Arc B570 (10 GB), Linux (Arch, Mesa 26.2.5 ANV, GE-Proton11-14 + vkd3d-proton), Ryzen 5 5600, 32 GB RAM + 46 GB swap | **3D world renders (prison opening scene, guard tower, sky, credits, audio, Prologue pause menu, zero device removals)** once native Microsoft `d3dcompiler_47.dll` is installed in the Proton prefix (`winetricks -q d3dcompiler_47` + `WINEDLLOVERRIDES="d3dcompiler_47=n,b"`). Menus run at locked 30 fps (~3% GPU); 3D world reached 3,836 draws/frame and 1.6–2.5 fps during first-run pipeline compilation (~1,125 pipelines `being made`, 9,322 / 9,405 MB VRAM used on Series X, ~22 GB RAM). Only 3 compute shaders refused out of 25,790. Without native `d3dcompiler_47.dll`, Wine's built-in compiler fails on VIctory's internal HLSL shaders (dropping all indirect world draws, ambient lighting, depth twins, and the Series S two-plane composer). |
 
 The 10.5 GB of VRAM in the RX 7900 XTX table is the usage reported for that run.
 Memory use and frame time depend on the scene and settings. The [ray-tracing notes](docs/fork-ray-tracing.md)
@@ -91,8 +94,8 @@ model 6.6 and mesh shaders, Rust (the toolchain is pinned), the MSVC build
 tools, and your own dump of the title.
 
 ```powershell
-git clone https://github.com/avatarmanz/VIctory-7900XTX
-cd VIctory-7900XTX
+git clone https://github.com/niiithish/VIctory-Belobug-intel
+cd VIctory-Belobug-intel
 copy victory.example.toml victory.toml      # then set your paths, outside this folder
 cargo build --locked --profile diag -p victory --features diagnostics
 scripts\play.ps1 -Exe <path of your copy's executable>
@@ -156,20 +159,33 @@ On Arch Linux (adjust package names for your distro):
 # Cross-compilation linker & LLVM tools
 sudo pacman -S lld clang llvm
 
-# Proton/vkd3d-proton launcher + Vulkan driver (pick your GPU driver)
-sudo pacman -S umu-launcher vulkan-intel   # or vulkan-radeon / nvidia-utils
+# Proton/vkd3d-proton launcher + winetricks + Vulkan driver (pick your GPU driver)
+sudo pacman -S umu-launcher winetricks vulkan-intel   # or vulkan-radeon / nvidia-utils
 
 # Rust Windows MSVC target + cargo-xwin
 rustup target add x86_64-pc-windows-msvc
 cargo install --locked cargo-xwin
 ```
 
-### Build and configure
+### Build, install native `d3dcompiler_47`, and configure
 
 ```bash
 cp victory.example.toml victory.toml   # set game_dir, cache_dir, data_dir outside the repo
 cargo xwin build --locked --profile diag --target x86_64-pc-windows-msvc -p victory --features diagnostics
+
+# Initialize the prefix once (downloads GE-Proton + steamrt4), then install native d3dcompiler_47:
+./scripts/play-linux.sh --dry-run
+WINEPREFIX="$HOME/.local/share/umu/prefixes/victory" winetricks -q d3dcompiler_47
 ```
+
+> **Why native `d3dcompiler_47` is required on Linux:** Wine's built-in
+> `d3dcompiler_47.dll` fails to compile 4 of VIctory's internal HLSL shaders
+> (`RWByteAddressBuffer.InterlockedOr` in the indirect argument clamp, `isnan()`
+> in the ambient stand-in, the depth-twin copy shader, and `vs_5_1`
+> `[RootSignature]` in the Series S two-plane composer). Without Microsoft's
+> native `d3dcompiler_47.dll` (`WINEDLLOVERRIDES="d3dcompiler_47=n,b"`, set
+> automatically by `scripts/play-linux.sh`), all indirect 3D world draws are
+> dropped and you only see sky + UI.
 
 ### Launch (`scripts/play-linux.sh`)
 
@@ -196,11 +212,14 @@ converts them to Wine `Z:\` paths, keeps `vkd3d-proton.cache` in `$CACHE_DIR/vkd
   `VICTORY_LEVELS_ON_DEMAND=1` (saves ~2.2–3.0 GB VRAM), `VICTORY_OUTPUT=1920x1080`,
   and `VICTORY_CARD_BUFFERS_MIN_MB=1` / `VICTORY_CARD_BUFFERS_MB=512` (leaves VRAM
   headroom alongside ~1.5 GB used by the desktop while offloading large buffer checks).
-- **Use `--console series-x` on Linux (default in `play-linux.sh`):** `--console series-s`
-  presents the UI on a second plane via `Composer`, whose `vs_5_1` `[RootSignature]`
-  shader currently fails (`0x80004005`) under Wine's built-in `d3dcompiler_47.dll`,
-  leaving a black screen over the base plane. Series X renders a single plane and avoids
-  this.
+- **Series S vs Series X on Linux:** With native `d3dcompiler_47.dll` installed,
+  both `--console series-x` (default, 1080p) and `--console series-s` (lower VRAM
+  footprint, ~5 ms faster) work. On 10 GB cards (where Series X reaches ~9.3 / 9.4 GB
+  VRAM), try `--console series-s` to reduce texture eviction pressure.
+- **First-run pipeline compilation:** The first time you enter the world, ~1,100+
+  pipelines compile on background threads (`being made`), causing low initial FPS
+  (~2 fps) and missing objects until they finish. Run with `VICTORY_PIPELINE_BOOK=1`
+  and then `./scripts/play-linux.sh --warm` to pre-build them into the driver cache.
 - **Note on `--ports` (`VICTORY_PORT_CBV=1`):** `VICTORY_PORT_CBV=1` changes the shader
   cache key; if you pre-translated shaders without `--ports`, test `./scripts/play-linux.sh --kbm`
   first or re-run `./scripts/play-linux.sh --ports --shaders`.

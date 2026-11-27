@@ -109,6 +109,9 @@ to_win_path() {
 export GAMEID="${GAMEID:-0}"
 export PROTONPATH="${PROTONPATH:-GE-Proton}"
 export WINEPREFIX="${WINEPREFIX:-$HOME/.local/share/umu/prefixes/victory}"
+# Native d3dcompiler_47 is required for VIctory's internal HLSL shaders (indirect clamp,
+# ambient lighting, depth twin copy, and Series S two-plane composer).
+export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+${WINEDLLOVERRIDES};}d3dcompiler_47=n,b"
 mkdir -p "$WINEPREFIX"
 
 export VICTORY_GAME_DIR="$(to_win_path "$GAME_DIR")"
