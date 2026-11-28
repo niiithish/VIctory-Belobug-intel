@@ -5,12 +5,22 @@
 # -Fsr4K        PC FidelityFX at 3840x2160 (quality, balanced or performance): FSR 4.1.2 where AMD's SDK offers it for the card, FSR 3.1 otherwise
 # -Build        target\diag (the default, the build all measurements are of) or target\release
 #               Light DRED is requested by default for diag and requires --features diagnostics.
+# -IntelArc     tuned for Intel Arc B570/B580 (10-12 GB VRAM): Series S, levels-on-demand, residency, 512-1024 MB card buffers, F3 HUD
+# -Ports        enable renderer patches 1, 2, 5, 6 and 7 (pre-translate with VICTORY_PORT_CBV=1 first)
+# -Kbm          enable GTA V PC-style keyboard & mouse controls (F2 or ` toggles mouse-look)
+# -Book         record used pipelines (VICTORY_PIPELINE_BOOK=1) for `victory.exe warm --used`
+# -Console      series-x or series-s (defaults to series-s when -IntelArc is set, else series-x)
 # -More         other settings: -More @{VICTORY_PANEL='1'}
 # Run it from a normal window, not as administrator: the driver then keeps its shader cache elsewhere.
 param(
     [Parameter(Mandatory)][string]$Exe,
     [switch]$Safe,
     [switch]$RayTracing,
+    [switch]$IntelArc,
+    [switch]$Ports,
+    [switch]$Kbm,
+    [switch]$Book,
+    [ValidateSet('series-x', 'series-s')][string]$Console,
     [ValidateSet('quality', 'balanced', 'performance')][string]$Fsr4K,
     [ValidateSet('diag', 'release')][string]$Build = 'diag',
     [hashtable]$More = @{}
@@ -28,6 +38,21 @@ if ($Safe) {
     $settings.VICTORY_THIN = '1'; $settings.VICTORY_JOIN_PARTS = '8'; $settings.VICTORY_UPLOAD_AHEAD = '1'
 }
 if ($RayTracing) { $settings.VICTORY_BVH_BUILDER = '1' }
+if ($IntelArc) {
+    if (-not $Console) { $Console = 'series-s' }
+    $settings.VICTORY_D3D12_ADAPTER = 'Intel'
+    $settings.VICTORY_LEVELS_ON_DEMAND = '1'
+    $settings.VICTORY_RESIDENCY = '1'
+    $settings.VICTORY_CARD_BUFFERS_MIN_MB = '1'
+    $settings.VICTORY_CARD_BUFFERS_MB = '768'
+    $settings.VICTORY_PANEL = '1'
+}
+if ($Ports) {
+    $settings.VICTORY_PORT_CONSTANTS = '1'; $settings.VICTORY_PORT_DESCRIPTORS = '1'
+    $settings.VICTORY_PORT_CBV = '1'; $settings.VICTORY_PORT_GUARD = '1'; $settings.VICTORY_PORT_JOURNAL = '1'
+}
+if ($Kbm) { $settings.VICTORY_KBM_GTA = '1' }
+if ($Book) { $settings.VICTORY_PIPELINE_BOOK = '1' }
 if ($Fsr4K) { $settings.VICTORY_FSR_4K = $Fsr4K.ToLowerInvariant() }
 foreach ($k in $More.Keys) { $settings[$k] = $More[$k] }
 
@@ -46,5 +71,8 @@ if ($discarded) {
     Write-Host "Discarded inherited values for $($discarded.Name -join ', '). Use -More to pass them explicitly."
 }
 $Exe = (Resolve-Path $Exe).Path
+$runArgs = @('run', $Exe)
+if ($Console) { $runArgs += @('--console', $Console) }
+$runArgs += '--execute'
 Push-Location (Join-Path $PSScriptRoot '..')   # victory.toml is looked for here
-try { & $victory run $Exe --execute } finally { Pop-Location }
+try { & $victory @runArgs } finally { Pop-Location }

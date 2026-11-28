@@ -23,6 +23,49 @@ lighting that is too bright or too dark when walking indoors are next in line.
 copy of the game. It is not affiliated with or endorsed by the game's developer
 or publisher.
 
+## Intel Arc (B580 12 GB / B570 10 GB) Quick Start
+
+This fork integrates **PR #614** (mapped-tile VRAM accounting & eviction for
+`VICTORY_LEVELS_ON_DEMAND=1`) and **PR #421** (Linux `vkd3d-proton` pipeline
+library persistence, 64 MB worker stacks, Wine HLSL fixes, and opt-in watchdog
+disarm), allowing 10–12 GB Intel Arc Battlemage GPUs to boot and render the 3D
+world without running out of VRAM in menus.
+
+### Windows (Intel Arc B580 / B570)
+
+```powershell
+git clone https://github.com/niiithish/VIctory-Belobug-intel
+cd VIctory-Belobug-intel
+copy victory.example.toml victory.toml   # set game_dir, cache_dir, data_dir OUTSIDE this folder
+cargo build --locked --profile release -p victory
+
+# 1. Pre-translate shaders with renderer patch 5 enabled (~1 min):
+$env:VICTORY_PORT_CBV = '1'
+target\release\victory.exe shaders <path-to-your-game-dir>\shaders.rpf
+
+# 2. First run: record used pipelines (-Book), reach the opening scene, then close:
+scripts\play.ps1 -Exe <path-to-your-game-dir>\game_scarlett_master.exe -Build release -IntelArc -Ports -Book -Kbm
+
+# 3. Pre-warm recorded pipelines into the driver cache (skips/blacklists any hanging shaders):
+$env:VICTORY_PORT_CBV = '1'
+target\release\victory.exe warm --used
+
+# 4. Play warm (F3 toggles FPS/VRAM HUD; F2 or ` toggles mouse-look):
+scripts\play.ps1 -Exe <path-to-your-game-dir>\game_scarlett_master.exe -Build release -IntelArc -Ports -Kbm
+```
+
+> **12 GB Arc B580 tip:** `-IntelArc` sets `VICTORY_CARD_BUFFERS_MB=768`,
+> `VICTORY_LEVELS_ON_DEMAND=1`, `VICTORY_RESIDENCY=1`, and `--console series-s`.
+> On a 12 GB B580 you have ~2 GB more VRAM headroom than the 10 GB B570 (less
+> `SHARED` PCIe spill and lower GPU frame times) — close background browsers /
+> GPU apps before launching to maximize local VRAM budget.
+
+### Linux (Intel Arc B580 / B570 via Proton + `vkd3d-proton`)
+
+See [Running on Linux (Proton / vkd3d-proton)](#running-on-linux-proton--vkd3d-proton)
+below for full package installation, cross-compilation (`cargo-xwin`), native
+`d3dcompiler_47` setup, and [scripts/play-linux.sh](scripts/play-linux.sh).
+
 ## Where it stands (2026-11-26)
 
 The measurements below come from one Windows 11 PC with an Intel i9-12900K,
